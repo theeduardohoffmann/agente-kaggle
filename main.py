@@ -1,27 +1,11 @@
 """
 Kaggriculture agent.
 
-Business rules (the user gave explicit permission to change these from the
-original spec after we pulled a real opponent's replay via the Kaggle CLI --
-episode 112626139 -- and found they invest hard in land/animals/premium
-crops from day 0 and tolerate cash near zero for a stretch. We tried
-matching that literally by dropping RESERVE to 100-400; measured against the
-real engine with analysis/bench.py, that came out WORSE than the original
-1000, not better -- a thin reserve just leaves this agent's own farm
-perpetually cash-starved without reproducing the opponent's actual edge,
-which is elsewhere. RESERVE stayed at 1000, but three real structural bugs
-found chasing that experiment are kept, because they were bugs regardless of
-RESERVE's value -- see HIRE/BUY_SEED not gating on RESERVE and the
-always-advance fix in _tile_action):
-  1. Never let the bank balance drop below RESERVE (1000) after a
-     discretionary purchase (land, an animal). Hiring and buying seed are
-     exempt -- see the note above HIRE and BUY_SEED -- because they're core
-     production capacity, not optional growth spend, and gating them on
-     RESERVE created a trap where a thin workforce's trickle income could
-     never consistently climb back over the floor.
+Business rules (the user's own):
+  1. Never let the bank balance drop below RESERVE (1000) after any purchase.
   2. Only buy the next quadrant of land once every currently unlocked,
-     farmable tile is under active management (assigned to a worker's batch
-     or set aside for animals) -- i.e. the farm has no idle capacity left.
+     farmable tile is occupied (planted / weeded / built on) -- i.e. the
+     farm is "full".
   3. Never own more than MAX_COWS (13) cows.
   4. Respect season timing: don't start a crop / animal cycle that cannot be
      harvested AND sold before day 29 (the last day), and liquidate all
@@ -49,19 +33,24 @@ third-party docs, after those docs led to two costly wrong assumptions:
 Board convention (confirmed against the engine source): tiles are indexed
 tiles[y][x], farmer/hand positions are [x, y], NORTH decreases y, SOUTH
 increases y, EAST increases x, WEST decreases x.
+
+Tuning history worth knowing before changing numbers here: a real opponent's
+replay (Kaggle episode 112626139) showed a far more aggressive strategy --
+land/animals/premium crops from day 0, cash tolerated near zero for a
+stretch, exploding from $5.8k (day 17) to $100k+ (day 29). We tried matching
+that literally (RESERVE down to 100-400, land bought as soon as tiles were
+merely *assigned* rather than literally empty, hiring/seed purchases/animals
+gated much more loosely, FAST_CASH_MIN_DAY lowered) and it measured WORSE
+every time against analysis/bench.py, not better -- this agent's worker/tile
+mechanics aren't efficient enough yet to survive that level of risk the way
+the opponent's apparently are, and some of those changes also violated the
+user's own RESERVE rule for no real benefit. Reverted to the validated
+1000-RESERVE, conservative values everywhere. One real, unrelated bug fix
+from that experiment was kept regardless of RESERVE's value: see
+_tile_action's docstring on always advancing to the next tile in a batch.
 """
 
 SEASON_DAYS = 30
-# We tried dropping this much lower (100, then 400) after a real opponent's
-# replay (episode 112626139) showed them bottoming out at $52-85 before
-# exploding to $100k+. That single-number change made things worse, not
-# better, empirically (measured with analysis/bench.py): a thin RESERVE
-# converges the whole farm toward hovering right at the floor, and even with
-# HIRE/BUY_SEED no longer gated on it (see those call sites -- that part IS
-# a real, kept fix: a worker with no seed money abandons its whole tile
-# batch otherwise), a farm that's perpetually cash-starved just can't build
-# the workforce or seed stock the aggressive opponent had. 1000, the
-# original value, is what's actually been validated to grow reliably here.
 RESERVE = 1000
 MAX_COWS = 13
 DROP_THRESHOLD = 8          # carried items before a crop-worker heads to the shed
@@ -82,24 +71,14 @@ CROP_INFO = {
 # it badly). Actual market prices move with supply, so this is a starting
 # order, not gospel -- but it beats guessing.
 CROP_PRIORITY = ["MELON", "CARROT", "WHEAT", "STRAWBERRY", "TOMATO"]
-# A brand-new farm has no cash flow yet, so its first workers must not sink
-# a batch into a 12-day crop before a single sale has happened -- that alone
-# was enough to crash the whole economy to RESERVE before any income
-# started (verified against the real engine, not a hypothetical). Only
-# WHEAT/CARROT (first_yield_day 2, a handful of days to any harvest) are
-# eligible until there's a real buffer; MELON and the rest open up after.
+
+# A brand-new farm has no cash flow yet, so its first workers must not sink a
+# batch into a 12-day crop (MELON) before a single sale has happened -- that
+# alone was enough to crash the whole economy toward RESERVE in testing.
+# Only WHEAT/CARROT (first harvest in a handful of days) are eligible until
+# the farm has had a real chance to earn; MELON and the rest open up after
+# FAST_CASH_MIN_DAY (WHEAT's first harvest lands around day 4-5).
 FAST_CROPS = ["WHEAT", "CARROT"]
-# Gating on "how many batches exist so far" sounds safer than a raw day
-# count, but it isn't: once enough hands are hired to need a 4th+ batch,
-# that batch goes straight to MELON regardless of how young the farm's
-# economy still is, recreating the exact 12-day-dry-spell deadlock this
-# was meant to prevent. A day count is what actually tracks "has income had
-# a chance to start" -- WHEAT's first harvest lands around day 4-5.
-# Tried lowering this to 2 (a real opponent mixed in STRAWBERRY/MELON seed
-# purchases from day 4). Measured worse: this agent's worker/tile mechanics
-# aren't as efficient as that opponent's, so committing batches to a 12-day
-# crop before ANY income exists starves it here even though it didn't
-# starve them. Reverted to 6.
 FAST_CASH_MIN_DAY = 6
 
 BASE_PRICE = {crop: info["base_price"] for crop, info in CROP_INFO.items()}
@@ -122,6 +101,17 @@ ANIMAL_DAY_CUTOFF = 20      # don't start a fresh coop/pasture cycle after this 
 LAND_DAY_CUTOFF = 26
 HIRE_DAY_CUTOFF = 28
 LIQUIDATE_DAY = 27          # start dumping everything regardless of price impact
+TILES_PER_WORKER = 4        # a single hand can easily water/harvest several
+                             # nearby tiles in one day; since hands must be
+                             # re-hired from scratch every morning (fibonacci
+                             # cost resets daily), one hand per tile means
+                             # paying a full day's wage for ~2 useful actions
+                             # and 22 idle turns -- a batch per hand cuts
+                             # headcount (and hiring cost) roughly this much
+                             # for the same coverage
+ANIMAL_RESERVE_PER_QUADRANT = 3  # tiles set aside for animals before crop
+                                  # jobs can claim every tile in a quadrant --
+                                  # see the note in ensure_tile_queue
 
 STATE = {
     "jobs": {},              # unit_id -> {"tiles": [(x,y), ...], "crop": str or None, "idx": int}
@@ -186,34 +176,23 @@ def can_finish(crop, day):
 
 
 def pick_crop(day, seeds, money):
-    """Choosing a crop only needs to afford a single seed -- the batch
-    purchase later sizes itself to the real reserve. Requiring headroom for
-    several seeds up front (an earlier version required 3x) starves the
-    agent once money sits near RESERVE: it can never plant, so it never
-    earns, so it never leaves RESERVE -- a permanent deadlock.
+    """Below FAST_CASH_MIN_DAY, only WHEAT/CARROT are eligible (see the note
+    by FAST_CROPS). After that, prefer whichever affordable crop the fewest
+    workers have already committed to -- MELON's ~5x better $/tile-day joins
+    in without every worker piling onto it and crashing its own market
+    price.
 
-    The first few worker batches always get a fast 2-4 day crop (see
-    FAST_CROPS): a brand-new farm has zero cash flow, and committing an
-    early batch to MELON's 12-day payback before any sale has happened is
-    what crashed the whole economy to RESERVE in testing. Once that baseline
-    income exists, later batches diversify into whichever affordable crop
-    the fewest workers have already committed to -- MELON's ~5x better
-    $/tile-day joins in without every worker piling onto it and crashing its
-    own market price."""
+    The affordability check here is plain (`money >= seed cost`), not gated
+    on RESERVE: requiring the CHOICE itself to clear RESERVE recreates a
+    deadlock at whatever RESERVE is once money converges near it (never
+    choosing a crop again). The actual BUY_SEED purchase below is what
+    enforces spending limits, with a smaller-batch fallback."""
     pool = FAST_CROPS if day < FAST_CASH_MIN_DAY else CROP_PRIORITY
     candidates = []
     for crop in pool:
         if not can_finish(crop, day):
             continue
         info = CROP_INFO[crop]
-        # Plain affordability, not gated on RESERVE: RESERVE is a "don't go
-        # negative" guard now, not a safety cushion, and requiring the choice
-        # itself to clear it recreates the same deadlock at whatever number
-        # RESERVE is -- once money converges near the floor (which it does,
-        # by design, under an aggressive spending policy), no crop can ever
-        # be chosen again. The actual BUY_SEED step below is what respects
-        # RESERVE, with a smaller-batch fallback, so overspending is still
-        # impossible even though the choice itself doesn't check it.
         if seeds.get(crop, 0) > 0 or money >= info["seed"]:
             candidates.append(crop)
     if not candidates:
@@ -230,9 +209,6 @@ def count_placed_animals(tiles, unlocked_tiles, animal):
     return n
 
 
-ANIMAL_RESERVE_PER_QUADRANT = 3  # see note in ensure_tile_queue
-
-
 def ensure_tile_queue(unlocked_tiles):
     if len(unlocked_tiles) != STATE["known_unlocked"]:
         STATE["known_unlocked"] = len(unlocked_tiles)
@@ -244,8 +220,8 @@ def ensure_tile_queue(unlocked_tiles):
         # 4 tiles already covers all 25 in the NW quadrant), so by the time
         # `want_animals` flips on there is often nothing left in tile_queue
         # and no tile anywhere that isn't already claimed -- the herd never
-        # gets a single pasture built. Set a few tiles aside for animals
-        # up front, per quadrant, before crop jobs can claim them all.
+        # gets a single pasture built. Set a few tiles aside for animals up
+        # front, per quadrant, before crop jobs can claim them all.
         reserve, rest = new_tiles[:ANIMAL_RESERVE_PER_QUADRANT], new_tiles[ANIMAL_RESERVE_PER_QUADRANT:]
         STATE["animal_tiles"].extend(reserve)
         STATE["tile_queue"].extend(rest)
@@ -291,15 +267,6 @@ def _order_by_proximity(tiles_batch):
     return ordered
 
 
-TILES_PER_WORKER = 4  # a single hand can easily water/harvest several nearby
-                       # tiles in one day; since hands must be re-hired from
-                       # scratch every single morning (fibonacci cost resets
-                       # daily), one hand per tile means paying a full day's
-                       # wage for ~2 useful actions and 22 idle turns -- a
-                       # batch per hand cuts headcount (and hiring cost) by
-                       # roughly TILES_PER_WORKER x for the same coverage.
-
-
 def _tile_action(cell, job, day, seeds):
     """Returns (op, advance) for one tile in a worker's batch. `advance`
     tells the caller whether to move on to the next tile in the batch next
@@ -307,10 +274,9 @@ def _tile_action(cell, job, day, seeds):
     tile and waits abandons the REST of its batch too, including tiles that
     might be sitting ready to harvest -- verified against the real engine,
     this was silently freezing farms at whatever cash they had when seeds
-    ran out, no matter how low or high the reserve was set. The worker
-    cycles back to a blocked tile on its next lap and re-registers seed
-    demand then, so a stuck tile still gets noticed -- just not every single
-    turn."""
+    ran out, no matter the reserve. The worker cycles back to a blocked tile
+    on its next lap and re-registers seed demand then, so a stuck tile still
+    gets noticed -- just not every single turn."""
     if cell is None:
         crop = job.get("crop")
         if crop is None or not can_finish(crop, day):
@@ -503,14 +469,8 @@ def _run(obs):
     # gets first claim on the budget, before land/animals/wheat-topping ---
     if hour < 4 and day <= HIRE_DAY_CUTOFF:
         # One hand covers a TILES_PER_WORKER-tile batch, not a single tile,
-        # so headcount (and the daily re-hire bill) scales with tiles/4, not
-        # tiles/2 -- keeping the recurring fibonacci hiring cost from
-        # swamping what a modest crop of WHEAT/CARROT can actually earn.
-        # Tried scaling this cap up to 20 to match land bought via the
-        # fully_managed expansion check below; measured worse together (see
-        # the note on the land-expansion check -- reverted to the strict
-        # literal one, which rarely actually expands, so a big cap here
-        # mostly just meant over-hiring for the starting quadrant). Back to 8.
+        # so headcount (and the recurring daily re-hire bill) scales with
+        # tiles/4, not tiles/2.
         tiles_needing_workers = max(0, len(unlocked_tiles) - len(STATE["animal_tiles"]))
         desired = min(8, max(1, -(-tiles_needing_workers // TILES_PER_WORKER)))
         if day == 0:
@@ -519,12 +479,6 @@ def _run(obs):
             desired = min(desired, 6)
         if STATE["want_animals"]:
             desired += 1
-        # Tried letting hiring ignore RESERVE too (like seeds, below), on the
-        # theory that a hand is core capacity, not discretionary spend.
-        # Measured worse: unlike a $10-100 seed, a hire is expensive enough
-        # (fibonacci growing per hire) that letting it run all the way to $0
-        # left the farm with no cushion for anything else and no better a
-        # workforce for it. Reverted to respecting RESERVE here.
         hires_so_far = me["hires_today"]
         n_hired_this_turn = 0
         while len(hands) + n_hired_this_turn < desired and slots_left() > 0:
@@ -536,20 +490,6 @@ def _run(obs):
             n_hired_this_turn += 1
 
     # --- rule 2: expand land only once the current farm is fully occupied ---
-    # A real opponent's replay (episode 112626139) showed the actual winning
-    # move: buy land early even at near-zero cash and let the tripled tile
-    # count compound into an exponential lead once producing (day 17: $5.8k
-    # -> day 29: $100k+). We tried reproducing that here -- treating "every
-    # tile assigned to a worker" as "field full" (instead of the literal "no
-    # tile is None this instant", which ~20 tiles independently cycling
-    # harvest -> briefly empty -> replant rarely satisfies at once) so land
-    # actually gets bought, plus scaling the hire cap up so the new land
-    # doesn't sit unworked. Measured worse, repeatedly: this agent's
-    # worker/tile mechanics aren't as efficient as that opponent's, so
-    # doubling the tiles needing workers and seed batches before they've
-    # earned anything reliably crashed the whole economy toward RESERVE
-    # instead of compounding. Reverted to the strict literal check -- it
-    # expands rarely, but never tanks the farm doing it.
     empty_count = sum(1 for (x, y) in unlocked_tiles if tiles[y][x] is None)
     missing_quads = [q for q in LAND_ORDER if q not in unlocked]
     if empty_count == 0 and missing_quads and day <= LAND_DAY_CUTOFF and slots_left() > 0:
@@ -575,13 +515,9 @@ def _run(obs):
         if released:
             STATE["tile_queue"].sort(key=dist_to_shed)
 
-    # A screenshot of top-leaderboard matches (M&M&P&Q vs Boey, shared by the
-    # user) shows both sides already running a working pasture with several
-    # animals by day 3, with only 2-3 total units on the farm. Tried matching
-    # that by dropping the hands/cash gate here (>=1 hand, >=$500 surplus);
-    # measured worse -- committing this agent's thin early workforce to
-    # ranching before crop income is established starves both. Reverted to
-    # requiring hands >= 3 and a real cash surplus first.
+    # Require hands to already exist before committing to animals: the main
+    # farmer must never become the rancher, since with 0 hands that leaves
+    # nobody at all tending crops -- the whole farm goes idle.
     if (not STATE["want_animals"] and day <= ANIMAL_DAY_CUTOFF
             and money - RESERVE >= 3000 and len(hands) >= 3):
         STATE["want_animals"] = True
@@ -651,8 +587,8 @@ def _run(obs):
 
         job = STATE["jobs"].get(uid)
         # Capture the batch tile the worker is standing on BEFORE calling
-        # crop_worker_op: that call always advances job["idx"] now (even on
-        # a PASS from missing seed), so reading job["idx"] afterwards points
+        # crop_worker_op: that call always advances job["idx"] (see
+        # _tile_action's docstring), so reading job["idx"] afterwards points
         # at the NEXT tile, not the one `pos` actually matches -- silently
         # breaking demand registration below (pos would never match, so no
         # crop would ever get bought again after the first batch ran out).
@@ -697,28 +633,23 @@ def _run(obs):
     hands_ops = [ops_by_uid.get(f"hand{i}", ["PASS"]) for i in range(len(hands))]
 
     # --- buy seeds needed this turn (sized to cover every worker who wants one) ---
-    # Seeds are maintenance, not discretionary growth spend: RESERVE is a
-    # ceiling on hiring/land/animals, deliberate choices about whether to
-    # grow further, but if seed purchases respect it too, the moment money
-    # settles at exactly RESERVE (which greedy spending elsewhere drives it
-    # toward) becomes a mathematical dead end -- ANY seed purchase would dip
-    # a cent under the floor, so none ever happens again, so nothing is ever
-    # planted again, so the farm is frozen at that balance for the rest of
-    # the game (this is exactly what was happening, verified against the
-    # real engine). Only the true floor -- not going negative -- applies
-    # here; a few seeds is cheap enough that it's never the purchase that
-    # should be the one to starve the whole farm.
+    # Respects RESERVE like every other purchase (rule 1) -- we tried
+    # exempting seeds from it while chasing a much lower RESERVE (see the
+    # module docstring's tuning history), since a seed purchase dipping a
+    # cent under an exactly-converged floor was silently freezing the farm
+    # forever. That risk is real but small at RESERVE=1000 (a big buffer
+    # against $10-100 seed costs) and the exemption isn't worth violating the
+    # user's own "never below 1000" rule for marginal upside here.
     for crop, qty in seed_needs.items():
         if slots_left() <= 1:
             break
         seed_cost = CROP_INFO[crop]["seed"]
         cost = seed_cost * qty
-        available = money - committed
-        if cost <= available:
+        if affordable(cost):
             market_orders.append(["BUY_SEED", crop, qty])
             committed += cost
         else:
-            max_qty = max(0, int(available // seed_cost))
+            max_qty = max(0, int((money - committed - RESERVE) // seed_cost))
             if max_qty > 0:
                 market_orders.append(["BUY_SEED", crop, max_qty])
                 committed += max_qty * seed_cost
