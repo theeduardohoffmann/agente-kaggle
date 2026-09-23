@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local virtual environment (see README for how to recreate it)
+.venv/
+
+# Downloaded Kaggle replays -- large JSON files, reproducible via the CLI
+# (kaggle competitions replay <EPISODE_ID>), not meant to be version controlled
+replays/
+
+# Claude Code session-local state
+.claude/
+
+# Kaggle credentials -- never commit these
+kaggle.json
