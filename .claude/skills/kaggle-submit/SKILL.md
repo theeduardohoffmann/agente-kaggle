@@ -29,8 +29,9 @@ fica visível no leaderboard — **sempre confirme com o usuário antes do passo
    ```
 
    Se `kaggriculture` não aparecer na lista, o usuário precisa aceitar as
-   regras da competição pelo navegador primeiro (ver README § Submissão)
-   antes de continuar.
+   regras da competição pelo navegador primeiro, em
+   https://www.kaggle.com/competitions/kaggriculture ("Join Competition" /
+   "I Understand and Accept"), antes de continuar.
 
 4. Peça uma mensagem curta para a submissão (ou proponha uma descrevendo a
    mudança principal desta rodada), e **pergunte ao usuário se pode

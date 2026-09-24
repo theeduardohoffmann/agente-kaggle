@@ -10,8 +10,9 @@ oficial do jogo. Esta skill automatiza essa medição.
 ## Passos
 
 1. Confirme que o ambiente virtual do projeto existe e tem as dependências
-   instaladas (ver `requirements.txt`). Se `.venv` não existir, siga o
-   README § Testando localmente para criá-lo antes de continuar.
+   instaladas (ver `requirements.txt`). Se `.venv` não existir, crie-o com
+   `py -3.12 -m venv .venv`, ative-o e instale com
+   `pip install -r requirements.txt` antes de continuar.
 
 2. Rode a checagem de sintaxe primeiro:
 

@@ -96,7 +96,7 @@ enquanto for viável).
 ## Antes de submeter para a competição
 
 1. Rodar os 4 passos da "Regra de ouro" acima.
-2. Ver o [README § Submissão](README.md#submissão) para os comandos exatos
-   (ou usar a skill `/kaggle-submit`).
+2. Usar a skill `/kaggle-submit`, que tem os comandos exatos (credenciais,
+   confirmação de inscrição, envio e acompanhamento de status).
 3. Depois de submeter, sempre conferir o status (`PENDING` → `COMPLETE`) e o
    resultado da partida de validação antes de considerar a submissão boa.

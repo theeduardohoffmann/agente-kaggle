@@ -5,8 +5,8 @@ description: Confere se o agente Kaggriculture (src/main.py) respeita as 4 regra
 
 ## Passos
 
-1. Confirme que o ambiente virtual do projeto existe (ver `requirements.txt`
-   e o README § Testando localmente).
+1. Confirme que o ambiente virtual do projeto existe e tem as dependências
+   instaladas (ver `requirements.txt`).
 
 2. Rode a checagem de regras:
 
