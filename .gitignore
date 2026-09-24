@@ -9,8 +9,10 @@ __pycache__/
 # (kaggle competitions replay <EPISODE_ID>), not meant to be version controlled
 replays/
 
-# Claude Code session-local state
-.claude/
+# Claude Code session-local state (project-level skills in .claude/skills/
+# ARE tracked -- see the negation below)
+.claude/*
+!.claude/skills/
 
 # Kaggle credentials -- never commit these
 kaggle.json
