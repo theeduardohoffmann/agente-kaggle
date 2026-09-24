@@ -1,18 +1,3 @@
-"""
-Lightweight smoke test for main.agent().
-
-This is NOT the real Kaggriculture engine (kaggle-environments could not be
-installed in this environment -- it depends on pygame, which has no prebuilt
-wheel for this Python version here). Instead this hand-rolls a minimal, but
-structurally faithful, fake world (per docs/AGENTS.md) and drives the agent
-through many turns, applying simplified versions of the documented mechanics
-(watering/feeding countdown -> weeds/escape, harvesting, market buy/sell,
-land purchase, hiring) so we can catch exceptions and sanity-check behaviour
-(reserve never violated, cow cap respected, land bought only when full).
-"""
-import copy
-import random
-
 import main as agent_module
 
 BOARD = 10
@@ -59,7 +44,7 @@ def build_obs(world, day, hour, step):
                 "unlocked_quadrants": world["unlocked_quadrants"],
                 "hires_today": world["hires_today"],
             },
-            {  # fake opponent, unused by our agent
+            {
                 "money": 3000, "tiles": [[None] * BOARD for _ in range(BOARD)],
                 "farmer": [7, 7], "hands": [], "unlocked_quadrants": ["NW"], "hires_today": 0,
             },
@@ -165,8 +150,6 @@ def apply_unit_op(world, pos, op, day):
     if verb == "DROP":
         inv = world["_carry_ref"]
         for k, v in list(inv.items()):
-            if k in ("WHEAT",) and cell is None:
-                pass
             world["shed"][k] = world["shed"].get(k, 0) + v
             inv[k] = 0
         return
@@ -256,9 +239,6 @@ def end_of_day(world, day):
                     cell["fertilizer_available"] = True
                 cell["fed_today"] = False
                 cell["cared_today"] = False
-    # Per docs/AGENTS.md: carried items transfer into the shed at day's end
-    # (capped by shed capacity); our earlier version wrongly just discarded
-    # hand inventories instead of banking them.
     shed_cap = 100
     shed_total = sum(v for k, v in world["shed"].items())
     for inv in world["inventories"]:
@@ -302,10 +282,6 @@ def run():
             spent = money_before - world["money"]
             if spent > 0 and world["money"] < 0:
                 violations.append((step, "money went negative", world["money"]))
-            if world["money"] < agent_module.RESERVE - 1 and spent > 0:
-                # allow tiny slack for our flat fake sell price randomness
-                pass
-
             cows = sum(
                 1 for row in world["tiles"] for c in row
                 if isinstance(c, dict) and c.get("animal") == "COW"

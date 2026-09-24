@@ -1,6 +1,2 @@
-# Pinned per README § Testando localmente: newer kaggle-environments releases
-# have been fine too, but this is the exact version validated against the
-# real engine during development. If it ever stops registering the
-# `kaggriculture` environment, this pin is the first thing to try.
 kaggle-environments==1.32.7
 kaggle

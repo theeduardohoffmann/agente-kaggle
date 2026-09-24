@@ -1,6 +1,6 @@
 ---
 name: kaggle-submit
-description: Valida e submete o agente Kaggriculture (main.py) para a competição no Kaggle, depois acompanha o status da submissão. Use quando o usuário pedir para submeter, enviar ou colocar o agente na competição.
+description: Valida e submete o agente Kaggriculture (src/main.py) para a competição no Kaggle, depois acompanha o status da submissão. Use quando o usuário pedir para submeter, enviar ou colocar o agente na competição.
 ---
 
 Submeter consome uma das submissões diárias permitidas pela competição e
@@ -12,7 +12,7 @@ fica visível no leaderboard — **sempre confirme com o usuário antes do passo
 1. Rode a checagem de sintaxe:
 
    ```
-   python -c "import py_compile; py_compile.compile('main.py', doraise=True); print('OK')"
+   python -c "import py_compile; py_compile.compile('src/main.py', doraise=True); print('OK')"
    ```
 
 2. Rode `/bench` e `/check-rules` (ou os comandos equivalentes de
@@ -39,7 +39,7 @@ fica visível no leaderboard — **sempre confirme com o usuário antes do passo
 5. Depois de confirmado, submeta:
 
    ```
-   <venv>/Scripts/python.exe -m kaggle competitions submit kaggriculture -f main.py -m "MENSAGEM_AQUI"
+   <venv>/Scripts/python.exe -m kaggle competitions submit kaggriculture -f src/main.py -m "MENSAGEM_AQUI"
    ```
 
 6. Confirme o status:

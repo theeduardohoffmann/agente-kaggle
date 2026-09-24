@@ -11,15 +11,30 @@ terreno e negociando num mercado dinâmico compartilhado.
 **Resultado atual** (medido contra o motor oficial do jogo, não uma
 simulação aproximada): saldo final médio de **~$5.000** partindo de $3.000
 iniciais (chegando a $12.500+ em partidas favoráveis), respeitando com
-precisão as 4 regras de negócio definidas pelo usuário. Veja
-[`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md) para o histórico
-completo de como esse número evoluiu.
+precisão as 4 regras de negócio definidas pelo usuário.
+
+## Estrutura do projeto
+
+```
+src/
+  main.py               # o agente — arquivo único, ponto de entrada da submissão
+  test_smoke.py          # smoke test simplificado (não é o motor oficial)
+analysis/
+  bench.py               # roda N partidas reais, reporta saldo médio/mín/máx
+  check_rules.py          # confere as 4 regras de negócio turno a turno
+.claude/skills/           # skills do Claude Code (/bench, /check-rules, /kaggle-submit)
+requirements.txt
+CLAUDE.md                  # convenções do projeto para sessões futuras do Claude Code
+```
+
+`src/main.py` é intencionalmente um único arquivo sem módulos internos — é
+o que o Kaggle recebe na submissão (veja a seção Submissão abaixo).
 
 ## Como o agente funciona
 
-O `main.py` é uma única função `agent(obs)` que decide, a cada turno, as
-ações do fazendeiro principal, de cada ajudante contratado, e as ordens de
-mercado. A estratégia é dividida em papéis:
+O `agent(obs)` em `src/main.py` decide, a cada turno, as ações do fazendeiro
+principal, de cada ajudante contratado, e as ordens de mercado. A estratégia
+é dividida em papéis:
 
 - **Trabalhadores de cultivo** — cada unidade (fazendeiro ou diarista) cuida
   de um lote de ~4 tiles próximas entre si, em ciclo: plantar → regar →
@@ -27,15 +42,20 @@ mercado. A estratégia é dividida em papéis:
   trigo/cenoura no começo da temporada (retorno rápido, baixo risco) e
   diversifica para melão/morango/tomate depois que a fazenda já tem alguma
   folga de caixa — melão sozinho rende ~5x mais por tile-dia que trigo, mas
-  leva 12 dias até a primeira colheita.
+  leva 12 dias até a primeira colheita, então plantá-lo cedo demais crashava
+  a economia inteira antes de qualquer venda acontecer.
 - **Cuidador de animais** — uma unidade dedicada, uma vez que a fazenda tenha
   diaristas e caixa suficientes, constrói pastos, compra vacas, e prioriza
   sempre alimentar os animais já existentes antes de expandir o rebanho
-  (perder um animal por fome é irreversível).
+  (perder um animal por fome é irreversível — duas alimentações perdidas
+  seguidas e o animal foge para sempre).
 - **Contratação e expansão de terreno** — diaristas são recontratados do
-  zero todo dia (o motor não mantém eles de um dia para o outro), então o
-  agente hire em lotes pela manhã; terreno novo só é comprado quando o
-  quadrante atual está inteiramente ocupado.
+  zero todo dia (o motor não mantém eles de um dia para o outro, custo
+  Fibonacci reiniciando), então o agente contrata em lotes pela manhã, um
+  trabalhador por lote de tiles (não um por tile — cobrir a fazenda inteira
+  com 1 trabalhador por tile custaria a folha de pagamento inteira em
+  contratação). Terreno novo só é comprado quando o quadrante atual está
+  inteiramente ocupado.
 - **Mercado** — vendas são feitas aos poucos (drip-sell) para não derrubar o
   preço, com lotes menores para bens premium e maiores para básicos; perto
   do fim da temporada, tudo em estoque é liquidado, já que estoque não
@@ -43,66 +63,69 @@ mercado. A estratégia é dividida em papéis:
 
 A lógica de todo o motor (preços, prazos de colheita, mecânica de
 plantio/contratação) foi extraída diretamente do **código-fonte oficial** do
-motor de jogo, não de documentação de terceiros — ver a nota em
-`CLAUDE.md` § Fonte de verdade.
+motor de jogo (`kaggle_environments/envs/kaggriculture/kaggriculture.py`,
+instalado junto do pacote — veja o passo 4 da seção de teste abaixo), não de
+documentação de terceiros. Isso importa: documentação de comunidade levou a
+pelo menos dois bugs sérios no início do desenvolvimento (mecânica de
+respawn diário das unidades, e uma validação atômica de plantio não
+documentada — se o total de pedidos de `PLANT` de uma safra num turno passa
+do estoque de sementes, o motor cancela **todos** os pedidos, não só o
+excedente).
 
-## Como foi desenvolvido
-
-Este agente passou por 4 rodadas de investigação e ajuste, cada uma medida
-contra o motor oficial do jogo (não contra suposições). Resumo:
-
-1. **Rodada 1** — primeira vez rodando contra o motor real expôs 5 bugs
-   sérios (incluindo um em que o próprio código de proteção contra erros
-   nunca era executado pelo carregador do Kaggle). Corrigidos, saldo médio
-   foi de instável para ~$3.600.
-2. **Rodada 2** — a fazenda ficava presa num único campo; a causa era um lote
-   de trabalho mal agrupado (tiles à mesma distância do paiol mas em lados
-   opostos do campo viravam erva daninha por falta de rega). Corrigido,
-   saldo médio subiu para ~$6.500.
-3. **Rodada 3** — testadas várias otimizações adicionais; a maioria piorou o
-   resultado (expandir terreno mais cedo, investir em gado mais cedo), mas
-   vender em lotes maiores ajudou de verdade.
-4. **Rodada 4** — depois de uma derrota real na competição, o replay do
-   oponente foi analisado (via `kaggle competitions replay`) e mostrou uma
-   estratégia bem mais agressiva. Tentativas de replicá-la pioraram o
-   resultado aqui (e uma delas chegou a violar a própria regra de reserva
-   mínima do usuário) — revertidas, mas um bug real e independente da
-   estratégia foi encontrado e corrigido no processo.
-
-Veja [`docs/DEVELOPMENT_LOG.md`](docs/DEVELOPMENT_LOG.md) para o relato
-completo de cada rodada, incluindo o que foi tentado e não funcionou.
-
-## Estrutura do projeto
-
-```
-main.py                 # o agente — arquivo único, pronto para submissão
-test_smoke.py            # smoke test simplificado (não é o motor oficial)
-requirements.txt         # dependências pinadas
-analysis/
-  bench.py               # roda N partidas reais, reporta saldo médio/mín/máx
-  check_rules.py          # confere as 4 regras de negócio turno a turno
-docs/
-  DEVELOPMENT_LOG.md       # histórico detalhado de desenvolvimento
-CLAUDE.md                 # padrões e convenções do projeto
-.claude/skills/            # skills do Claude Code (/bench, /check-rules, /kaggle-submit)
-```
-
-`main.py` fica na raiz de propósito e não é dividido em módulos — é o que o
-Kaggle espera receber na submissão (ver `CLAUDE.md`).
-
-## Regras de negócio (definidas pelo usuário, implementadas em `main.py`)
+## Regras de negócio (definidas pelo usuário, implementadas em `src/main.py`)
 
 1. **Reserva mínima de $1.000** — nenhuma compra pode deixar o saldo abaixo
    disso.
 2. **Só expandir terreno quando o campo atual estiver inteiramente
-   ocupado.**
-3. **Máximo de 13 vacas.**
+   ocupado** — evita gastar em mais terra antes de conseguir cuidar da que
+   já existe.
+3. **Máximo de 13 vacas** — limite superior para o rebanho, não uma meta a
+   forçar.
 4. **Respeitar o tempo de temporada** — não iniciar um plantio ou ciclo
    animal que não teria tempo de terminar e ser vendido antes do dia 30;
    liquidar tudo que sobrar no paiol perto do fim.
 
 Todas as 4 são reconferidas automaticamente, turno a turno, por
-`analysis/check_rules.py` contra o motor oficial.
+`analysis/check_rules.py` contra o motor oficial. No código, cada regra tem
+exatamente um comentário de uma linha no ponto onde é aplicada.
+
+## Como foi desenvolvido
+
+O agente passou por várias rodadas de investigação e ajuste, cada uma medida
+contra o motor oficial do jogo (nunca contra suposições):
+
+- **Bugs de fundação** — a primeira vez rodando contra o motor real (não um
+  harness simplificado feito à mão) expôs vários bugs sérios: o próprio
+  código de proteção contra erros nunca era executado (o carregador do
+  Kaggle roda o *último* `def` do arquivo, não uma função chamada `agent`
+  especificamente); a validação atômica de plantio mencionada acima; e um
+  deadlock de caixa em que a escolha de safra exigia reserva demais para
+  sequer considerar plantar, uma vez que o saldo caísse perto do piso.
+- **Fazenda presa num único campo** — a causa era um lote de trabalho mal
+  agrupado: tiles à mesma distância do paiol mas em lados opostos do campo
+  viravam erva daninha por falta de rega, já que os lotes eram formados por
+  proximidade do paiol, não entre si.
+- **Otimizações de venda** — o teto de venda por turno (para não derrubar o
+  preço de mercado) estava mais conservador do que a curva real de preço do
+  jogo suporta; aumentá-lo ajudou de verdade. Tentativas de expandir terreno
+  ou investir em gado mais cedo, por outro lado, pioraram o resultado — o
+  gargalo real do jogo é o custo de contratação diário (reinicia todo dia)
+  crescendo mais rápido que a receita sempre que a fazenda expande rápido
+  demais.
+- **Tentativa de imitar um oponente real** — depois de uma derrota na
+  competição, o replay do oponente foi baixado (`kaggle competitions
+  replay`) e mostrou uma estratégia bem mais agressiva: terra, animais e
+  safras premium desde o dia 0, tolerando caixa quase zero por um bom tempo
+  antes de explodir exponencialmente. Reproduzir isso literalmente (reserva
+  bem mais baixa, gatilhos de investimento mais soltos) piorou o resultado
+  aqui em toda tentativa — a mecânica de trabalhadores deste agente não é
+  eficiente o bastante ainda para sobreviver a esse nível de risco do jeito
+  que o oponente sobrevive — e uma das tentativas chegou a violar a própria
+  regra de reserva mínima do usuário. Revertido para os valores validados,
+  mantendo apenas um bug real e independente da estratégia que foi
+  encontrado no processo (um trabalhador sem sementes ficava parado numa
+  tile vazia, abandonando as outras tiles do seu lote mesmo com colheita
+  pronta esperando).
 
 ## Testando localmente (passo a passo, terminal do VS Code)
 
@@ -125,9 +148,6 @@ cd "C:\Users\eduar\Desktop\agente-kaggle"
 ```powershell
 py -3.12 -m venv .venv
 ```
-
-Isso cria uma pasta `.venv` isolada, sem mexer no Python que você já usa
-para outras coisas.
 
 ### 3. Ativar o ambiente virtual
 
@@ -158,25 +178,27 @@ python -m pip install -r requirements.txt
 Com o ambiente ativado (prompt mostrando `(.venv)`):
 
 ```powershell
-python -c "from kaggle_environments import make; env = make('kaggriculture', configuration={'episodeSteps': 720}, debug=True); env.run(['main.py', 'random']); print([(i, s.reward, s.status) for i, s in enumerate(env.steps[-1])])"
+python -c "from kaggle_environments import make; env = make('kaggriculture', configuration={'episodeSteps': 720}, debug=True); env.run(['src/main.py', 'random']); print([(i, s.reward, s.status) for i, s in enumerate(env.steps[-1])])"
 ```
 
-Isso joga uma partida completa (720 turnos) do seu `main.py` contra o agente
+Isso joga uma partida completa (720 turnos) do agente contra o agente
 `"random"` e imprime, para cada jogador, `(índice, saldo final, status)`.
 `status` deve ser `"DONE"` — se aparecer `"ERROR"` ou `"INVALID"`, algo no
 agente quebrou (o Kaggle mostra o traceback nesse caso).
 
 Ou, de forma mais direta, use a skill `/bench` (roda várias partidas de uma
-vez e resume o resultado) ou `analysis/bench.py` diretamente.
+vez e resume o resultado) ou `python analysis/bench.py 15` diretamente.
+Para conferir as 4 regras de negócio, use `/check-rules` ou
+`python analysis/check_rules.py`.
 
-### 6. Ver a partida visualmente (renderiza um HTML e abre num servidor local)
+### 6. Ver a partida visualmente
 
 O `env.render(mode="ipython", ...)` só funciona dentro de um notebook
 Jupyter. Do terminal puro, gere o replay como HTML autossuficiente e sirva
 localmente:
 
 ```powershell
-python -c "from kaggle_environments import make; env = make('kaggriculture', configuration={'episodeSteps': 720}, debug=True); env.run(['main.py', 'random']); open('replay.html', 'w', encoding='utf-8').write(env.render(mode='html'))"
+python -c "from kaggle_environments import make; env = make('kaggriculture', configuration={'episodeSteps': 720}, debug=True); env.run(['src/main.py', 'random']); open('replay.html', 'w', encoding='utf-8').write(env.render(mode='html'))"
 python -m http.server 8000
 ```
 
@@ -191,10 +213,10 @@ Não é o motor oficial — uma simulação simplificada usada como teste rápid
 adicional:
 
 ```powershell
-python test_smoke.py
+python src/test_smoke.py
 ```
 
-## Submissão (passo a passo)
+## Submissão
 
 Ou use a skill `/kaggle-submit`, que automatiza estes passos com uma
 confirmação antes do envio em si.
@@ -231,13 +253,13 @@ Você deve ver `kaggriculture` na lista.
 ### 4. Enviar o agente
 
 ```powershell
-kaggle competitions submit kaggriculture -f main.py -m "descrição da mudança"
+kaggle competitions submit kaggriculture -f src/main.py -m "descrição da mudança"
 ```
 
-Se `main.py` precisar de outros arquivos junto no futuro, empacote tudo em
-um `.tar.gz` com `main.py` na raiz e submeta o pacote em vez do arquivo
-único (hoje não é necessário — o agente é um único arquivo, de propósito,
-ver `CLAUDE.md`).
+Se o agente precisar de outros arquivos junto no futuro, empacote tudo em um
+`.tar.gz` com `main.py` na raiz do pacote e submeta o pacote em vez do
+arquivo único (hoje não é necessário — o agente é um único arquivo, de
+propósito).
 
 ### 5. Acompanhar a submissão
 

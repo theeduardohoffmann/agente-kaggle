@@ -1,6 +1,6 @@
 ---
 name: check-rules
-description: Confere se o agente Kaggriculture (main.py) respeita as 4 regras de negócio do usuário (reserva mínima de $1000, expandir terreno só quando cheio, máximo 13 vacas, respeitar o tempo de safra) turno a turno numa partida real contra o motor oficial. Use depois de qualquer mudança em main.py, antes de submeter para a competição.
+description: Confere se o agente Kaggriculture (src/main.py) respeita as 4 regras de negócio do usuário (reserva mínima de $1000, expandir terreno só quando cheio, máximo 13 vacas, respeitar o tempo de safra) turno a turno numa partida real contra o motor oficial. Use depois de qualquer mudança em src/main.py, antes de submeter para a competição.
 ---
 
 ## Passos
